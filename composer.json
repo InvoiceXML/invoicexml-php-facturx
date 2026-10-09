@@ -1,0 +1,63 @@
+{
+    "name": "invoicexml/facturx",
+    "description": "PHP client for Factur-X e-invoices: create, validate, embed and extract EN 16931 invoices with the InvoiceXML API.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "facturx",
+        "factur-x",
+        "zugferd",
+        "facture-electronique",
+        "facturation-electronique",
+        "e-invoice",
+        "e-invoicing",
+        "einvoice",
+        "invoice",
+        "en16931",
+        "en-16931",
+        "cii",
+        "pdf-a-3",
+        "br-fr",
+        "validation"
+    ],
+    "homepage": "https://invoicexml.com",
+    "authors": [
+        {
+            "name": "InvoiceXML",
+            "homepage": "https://invoicexml.com"
+        }
+    ],
+    "support": {
+        "docs": "https://invoicexml.com/docs",
+        "issues": "https://github.com/InvoiceXML/invoicexml-php-facturx/issues",
+        "source": "https://github.com/InvoiceXML/invoicexml-php-facturx"
+    },
+    "require": {
+        "php": "^8.1",
+        "ext-json": "*",
+        "guzzlehttp/guzzle": "^7.5",
+        "guzzlehttp/psr7": "^2.4",
+        "psr/http-client": "^1.0",
+        "psr/http-factory": "^1.0",
+        "psr/http-message": "^1.1 || ^2.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "InvoiceXml\\FacturX\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "InvoiceXml\\FacturX\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
