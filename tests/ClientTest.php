@@ -116,7 +116,6 @@ final class ClientTest extends TestCase
                 'layer' => 'en16931',
                 'line' => 40,
                 'message' => 'Total with VAT does not match.',
-                'btCodes' => ['BT-112'],
                 'fields' => ['totals.invoiceTotalWithVat'],
                 'raw' => '[BR-CO-15] ...',
             ]],
@@ -132,7 +131,7 @@ final class ClientTest extends TestCase
             self::assertCount(1, $e->errors);
             self::assertSame('BR-CO-15', $e->errors[0]->rule);
             self::assertSame('en16931', $e->errors[0]->layer);
-            self::assertSame(['BT-112'], $e->errors[0]->btCodes);
+            self::assertSame(['totals.invoiceTotalWithVat'], $e->errors[0]->fields);
         }
     }
 
@@ -143,8 +142,8 @@ final class ClientTest extends TestCase
             'detail' => 'Valid.',
             'data' => ['hasEmbeddedXml' => true, 'schemaValid' => true, 'schematronValid' => true, 'profile' => 'en16931'],
             'errors' => [],
-            'warnings' => [['rule' => 'PROFILE', 'layer' => null, 'line' => null, 'message' => 'Advisory.', 'btCodes' => [], 'fields' => [], 'raw' => null]],
-            'report' => [['code' => 'BT-1', 'name' => 'Invoice number', 'section' => 'header', 'path' => 'invoiceNumber', 'value' => 'FA-1', 'isValid' => true, 'errors' => [], 'warnings' => []]],
+            'warnings' => [['rule' => 'PROFILE', 'layer' => null, 'line' => null, 'message' => 'Advisory.', 'fields' => [], 'raw' => null]],
+            'report' => [['name' => 'Invoice number', 'path' => 'invoiceNumber', 'value' => 'FA-1', 'isValid' => true, 'errors' => [], 'warnings' => []]],
         ]));
 
         $result = $client->validateFacturx(new File('%PDF-1.7 bytes', 'facture.pdf'));
@@ -161,7 +160,7 @@ final class ClientTest extends TestCase
         self::assertSame('en16931', $result->data['profile']);
         self::assertSame([], $result->errors);
         self::assertSame('PROFILE', $result->warnings[0]->rule);
-        self::assertSame('BT-1', $result->report[0]['code']);
+        self::assertSame('invoiceNumber', $result->report[0]['path']);
     }
 
     public function testValidateFacturxSendsEachRuleAsRepeatedField(): void
