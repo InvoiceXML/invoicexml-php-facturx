@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/InvoiceXML/invoicexml-php-facturx/actions/workflows/tests.yml/badge.svg)](https://github.com/InvoiceXML/invoicexml-php-facturx/actions/workflows/tests.yml)
 
-A thin PHP client for the [InvoiceXML API](https://invoicexml.com) that creates, validates, embeds and reads **Factur-X** e-invoices. A Factur-X invoice is a PDF/A-3 with embedded EN 16931 CII XML, the hybrid format of the French e-invoicing mandate.
+A thin PHP client for the [InvoiceXML API](https://www.invoicexml.com) that creates, validates, embeds and reads **Factur-X** e-invoices. A Factur-X invoice is a PDF/A-3 with embedded EN 16931 CII XML, the hybrid format of the French e-invoicing mandate.
 
 You send an invoice as a PHP array, and the API computes totals and the VAT breakdown, builds the XML and the PDF/A-3, and validates the result before returning it. Your project needs no PDF library, no XML builder and no Schematron tooling.
 
@@ -46,7 +46,7 @@ The result is a Factur-X PDF/A-3 in the EN 16931 profile, already validated agai
 
 ## Get an API key
 
-Sign up at [invoicexml.com](https://invoicexml.com/account/signup) to start a 30-day free trial with 100 credits. No credit card is needed. Plans are listed on the [pricing page](https://invoicexml.com/pricing).
+Sign up at [invoicexml.com](https://www.invoicexml.com/account/signup) to start a 30-day free trial with 100 credits. No credit card is needed. Plans are listed on the [pricing page](https://www.invoicexml.com/pricing).
 
 ## Usage
 
@@ -136,7 +136,7 @@ try {
 }
 ```
 
-`errorCode` is a stable numeric code, documented under [error handling](https://invoicexml.com/docs/error-handling).
+`errorCode` is a stable numeric code, documented under [error handling](https://www.invoicexml.com/docs/error-handling).
 
 When too many requests for one API key run at the same time, the API answers 429 with a `Retry-After` header. The client waits that long and resends the request, up to 3 times. A request answered with 429 was not processed and not billed, so resending never creates duplicates. If the retries are used up, a `TooManyRequestsException` carries `retryAfter` in seconds. Set `maxRetries: 0` to handle 429 yourself.
 
@@ -154,11 +154,11 @@ $client = new Client(
 
 ## Links
 
-- [Documentation](https://invoicexml.com/docs)
+- [Documentation](https://www.invoicexml.com/docs)
 - [API explorer](https://api.invoicexml.com/v1/scalar/)
-- [Factur-X in PHP guide](https://invoicexml.com/blog/factur-x-php)
+- [Factur-X in PHP guide](https://www.invoicexml.com/blog/factur-x-php)
 - [ZUGFeRD and XRechnung package for PHP](https://github.com/InvoiceXML/invoicexml-php-zugferd-xrechnung)
-- [Contact and support](https://invoicexml.com/contact)
+- [Contact and support](https://www.invoicexml.com/contact)
 
 ## License
 
