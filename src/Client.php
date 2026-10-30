@@ -25,6 +25,16 @@ use Psr\Http\Message\StreamFactoryInterface;
  *  - pdfUrl:     public URL of your own PDF to use as the visual layer.
  *  - includeAdvancedProperties: true adds an electronic invoice details section to the PDF.
  *  - rules:      ["br-fr"] also validates against the BR-FR Flux 2 rules of the French mandate.
+ *
+ * Email fields of the email methods (from and to are required):
+ *  - from:     sender address, on a domain verified in your dashboard.
+ *  - fromName: display name of the sender.
+ *  - to:       one recipient address.
+ *  - cc, bcc:  one address or a list of addresses, at most 2 addresses together.
+ *  - replyTo:  address replies go to.
+ *  - subject:  subject line. Defaults to a text with the invoice number.
+ *  - message:  plain-text message. Defaults to a short text with the invoice number.
+ * A list in any other field, or text that is not valid UTF-8, throws InvalidArgumentException before sending.
  */
 final class Client
 {
@@ -85,6 +95,21 @@ final class Client
     }
 
     /**
+     * Creates a Factur-X invoice like createFacturx() and sends it as a real email from your
+     * own verified domain. Returns the message id, not the file.
+     *
+     * @param array<string, mixed> $invoice InvoiceDocument fields.
+     * @param array<string, mixed> $email   Email fields, see the class description.
+     * @param array<string, mixed> $options InvoiceOptions, see the class description.
+     *
+     * @throws ApiException when the invoice would not be compliant or the email cannot be sent
+     */
+    public function emailFacturx(array $invoice, array $email, array $options = []): EmailResult
+    {
+        return $this->emailResult($this->postJson('/v1/create/facturx/email', $invoice, $options, $email));
+    }
+
+    /**
      * Validates a Factur-X PDF against the rule set of the profile its embedded XML declares.
      *
      * @param string|File  $pdf   Path to the PDF, or a File.
@@ -114,6 +139,25 @@ final class Client
     }
 
     /**
+     * Embeds an existing CII XML into an existing PDF like embedFacturx() and sends the
+     * Factur-X PDF/A-3 as a real email from your own verified domain. Returns the message
+     * id, not the file. The XML is always validated.
+     *
+     * @param string|File          $pdf   Path to the visual PDF, or a File.
+     * @param string|File          $xml   Path to the CII XML, or a File.
+     * @param array<string, mixed> $email Email fields, see the class description.
+     * @param list<string>         $rules Extra national rule sets checked before embedding, for example ["br-fr"].
+     *
+     * @throws ApiException when the invoice would not be compliant or the email cannot be sent
+     */
+    public function emailEmbeddedFacturx(string|File $pdf, string|File $xml, array $email, array $rules = []): EmailResult
+    {
+        $fields = ['rules' => $rules] + self::emailFormFields($email);
+
+        return $this->emailResult($this->postMultipart('/v1/embed/facturx/email', ['pdf' => $pdf, 'xml' => $xml], $fields));
+    }
+
+    /**
      * Reads a Factur-X PDF or a CII XML into invoice data. Deterministic: the XML is
      * parsed, no AI is involved. The returned ['invoice' => ...] array has the same
      * shape createFacturx() accepts.
@@ -137,17 +181,83 @@ final class Client
     }
 
     /**
-     * @param array<string, mixed> $invoice
-     * @param array<string, mixed> $options
+     * @param array<string, mixed>      $invoice
+     * @param array<string, mixed>      $options
+     * @param array<string, mixed>|null $email   Email fields of the email routes.
      */
-    private function postJson(string $path, array $invoice, array $options): ResponseInterface
+    private function postJson(string $path, array $invoice, array $options, ?array $email = null): ResponseInterface
     {
         $body = ['invoice' => $invoice];
         if ($options !== []) {
             $body['options'] = $options;
         }
+        if ($email !== null) {
+            $body['email'] = self::emailFields($email);
+        }
 
         return $this->send($path, 'application/json', json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * The email as sent, by the same rules on the JSON and the form routes. Null, empty strings
+     * and empty lists are never sent, also not as cc or bcc entries. Only cc and bcc take a list,
+     * because a form route would lose all but the first item of any other field.
+     *
+     * @param array<string, mixed> $email
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException when a single-value field holds a list or a text is not valid UTF-8
+     */
+    private static function emailFields(array $email): array
+    {
+        $fields = [];
+        foreach ($email as $name => $value) {
+            if ($name === 'cc' || $name === 'bcc') {
+                $value = self::copyAddresses($value);
+            } elseif (is_array($value)) {
+                throw new \InvalidArgumentException("email.{$name} takes a single value. Only cc and bcc take a list.");
+            }
+
+            foreach ((array) $value as $text) {
+                if (is_string($text) && preg_match('//u', $text) !== 1) {
+                    throw new \InvalidArgumentException("email.{$name} is not valid UTF-8.");
+                }
+            }
+
+            if ($value !== null && $value !== '' && $value !== []) {
+                $fields[$name] = $value;
+            }
+        }
+
+        return $fields;
+    }
+
+    /** @return list<string> One address or a list, trimmed and without blank entries. */
+    private static function copyAddresses(mixed $addresses): array
+    {
+        $kept = [];
+        foreach ((array) $addresses as $address) {
+            $address = trim((string) $address);
+            if ($address !== '') {
+                $kept[] = $address;
+            }
+        }
+
+        return $kept;
+    }
+
+    /**
+     * @param array<string, mixed> $email
+     * @return array<string, string|list<string>> The email.* form fields of the multipart email routes.
+     */
+    private static function emailFormFields(array $email): array
+    {
+        $fields = [];
+        foreach (self::emailFields($email) as $name => $value) {
+            $fields['email.' . $name] = $value;
+        }
+
+        return $fields;
     }
 
     /**
@@ -267,6 +377,11 @@ final class Client
     private function validation(ResponseInterface $response): ValidationResult
     {
         return ValidationResult::fromArray($this->json($response));
+    }
+
+    private function emailResult(ResponseInterface $response): EmailResult
+    {
+        return EmailResult::fromArray($this->json($response));
     }
 
     private function file(ResponseInterface $response, string $fallbackName): File

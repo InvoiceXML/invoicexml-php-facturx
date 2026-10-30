@@ -72,6 +72,26 @@ final class ClientTest extends TestCase
         return new Response($status, ['Content-Type' => 'application/json'] + $headers, json_encode($body, JSON_THROW_ON_ERROR));
     }
 
+    /** @return array<string, mixed> */
+    private static function email(): array
+    {
+        return [
+            'from' => 'facturation@atelier-lumiere.example',
+            'to' => 'compta@globex.example',
+            'fromName' => 'Atelier Lumière',
+            'cc' => ['anna@globex.example', 'ben@globex.example'],
+            'bcc' => ['archive@atelier-lumiere.example'],
+            'replyTo' => 'contact@atelier-lumiere.example',
+            'subject' => 'Votre facture',
+            'message' => "Bonjour Anna,\n\nvotre facture est jointe.",
+        ];
+    }
+
+    private static function acceptedResponse(): Response
+    {
+        return self::jsonResponse(['status' => 'accepted', 'messageId' => 'msg-123']);
+    }
+
     public function testCreateFacturxPostsEnvelopeAndReturnsPdf(): void
     {
         $client = $this->client(self::pdfResponse());
@@ -212,6 +232,250 @@ final class ClientTest extends TestCase
         $body = (string) $this->lastRequest()->getBody();
         self::assertStringNotContainsString('skipValidation', $body);
         self::assertStringNotContainsString('name="rules"', $body);
+    }
+
+    public function testEmailFacturxPostsEnvelopeAndReturnsMessageId(): void
+    {
+        $client = $this->client(self::acceptedResponse());
+
+        $result = $client->emailFacturx(self::invoice(), self::email(), ['language' => 'fr', 'rules' => ['br-fr']]);
+
+        $request = $this->lastRequest();
+        self::assertSame('POST', $request->getMethod());
+        self::assertSame('https://api.invoicexml.com/v1/create/facturx/email', (string) $request->getUri());
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
+        self::assertSame(
+            ['invoice' => self::invoice(), 'options' => ['language' => 'fr', 'rules' => ['br-fr']], 'email' => self::email()],
+            json_decode((string) $request->getBody(), true),
+        );
+
+        self::assertSame('accepted', $result->status);
+        self::assertSame('msg-123', $result->messageId);
+        self::assertSame(['status' => 'accepted', 'messageId' => 'msg-123'], $result->body);
+    }
+
+    public function testEmailOmitsOptionsAndUnsetEmailFields(): void
+    {
+        $client = $this->client(self::acceptedResponse());
+
+        $client->emailFacturx(self::invoice(), [
+            'from' => 'facturation@atelier-lumiere.example',
+            'to' => 'compta@globex.example',
+            'fromName' => null,
+            'cc' => [],
+            'subject' => '',
+        ]);
+
+        self::assertSame(
+            ['invoice' => self::invoice(), 'email' => ['from' => 'facturation@atelier-lumiere.example', 'to' => 'compta@globex.example']],
+            json_decode((string) $this->lastRequest()->getBody(), true),
+        );
+    }
+
+    public function testEmailEmbeddedFacturxSendsPartsRulesAndEmailFields(): void
+    {
+        $client = $this->client(self::acceptedResponse());
+
+        $result = $client->emailEmbeddedFacturx(new File('%PDF-1.7 visual', 'visual.pdf'), new File('<rsm:CrossIndustryInvoice/>', 'factur-x.xml'), self::email(), ['br-fr']);
+
+        $request = $this->lastRequest();
+        $body = (string) $request->getBody();
+        self::assertSame('https://api.invoicexml.com/v1/embed/facturx/email', (string) $request->getUri());
+        self::assertStringStartsWith('multipart/form-data; boundary=', $request->getHeaderLine('Content-Type'));
+        self::assertStringContainsString('name="pdf"; filename="visual.pdf"', $body);
+        self::assertStringContainsString('name="xml"; filename="factur-x.xml"', $body);
+        self::assertStringContainsString("name=\"rules\"\r\n\r\nbr-fr\r\n", $body);
+        self::assertStringContainsString("name=\"email.from\"\r\n\r\nfacturation@atelier-lumiere.example\r\n", $body);
+        self::assertStringContainsString("name=\"email.fromName\"\r\n\r\nAtelier Lumière\r\n", $body);
+        self::assertStringContainsString("name=\"email.to\"\r\n\r\ncompta@globex.example\r\n", $body);
+        self::assertStringContainsString("name=\"email.replyTo\"\r\n\r\ncontact@atelier-lumiere.example\r\n", $body);
+        self::assertStringContainsString("name=\"email.subject\"\r\n\r\nVotre facture\r\n", $body);
+        self::assertStringContainsString("name=\"email.message\"\r\n\r\nBonjour Anna,\n\nvotre facture est jointe.\r\n", $body);
+        self::assertStringNotContainsString('skipValidation', $body);
+
+        self::assertSame('accepted', $result->status);
+        self::assertSame('msg-123', $result->messageId);
+    }
+
+    public function testEmailEmbeddedFacturxSendsOneFormPartPerCopyAddress(): void
+    {
+        $client = $this->client(self::acceptedResponse());
+
+        $client->emailEmbeddedFacturx(new File('%PDF', 'a.pdf'), new File('<x/>', 'a.xml'), self::email());
+
+        $body = (string) $this->lastRequest()->getBody();
+        self::assertSame(2, substr_count($body, 'name="email.cc"'));
+        self::assertSame(1, substr_count($body, 'name="email.bcc"'));
+        self::assertStringContainsString("name=\"email.cc\"\r\n\r\nanna@globex.example\r\n", $body);
+        self::assertStringContainsString("name=\"email.cc\"\r\n\r\nben@globex.example\r\n", $body);
+        self::assertStringContainsString("name=\"email.bcc\"\r\n\r\narchive@atelier-lumiere.example\r\n", $body);
+        self::assertStringNotContainsString('email.cc[', $body);
+    }
+
+    public function testEmailEmbeddedFacturxOmitsUnsetFieldsAndRules(): void
+    {
+        $client = $this->client(self::acceptedResponse());
+
+        $client->emailEmbeddedFacturx(new File('%PDF', 'a.pdf'), new File('<x/>', 'a.xml'), [
+            'from' => 'facturation@atelier-lumiere.example',
+            'to' => 'compta@globex.example',
+            'fromName' => null,
+            'cc' => [],
+            'subject' => '',
+        ]);
+
+        $body = (string) $this->lastRequest()->getBody();
+        self::assertSame(2, substr_count($body, 'name="email.'));
+        self::assertStringContainsString('name="email.from"', $body);
+        self::assertStringContainsString('name="email.to"', $body);
+        self::assertStringNotContainsString('name="rules"', $body);
+    }
+
+    public function testEmailDomainNotVerifiedThrows(): void
+    {
+        $client = $this->client(self::jsonResponse([
+            'title' => 'Sender domain not verified',
+            'status' => 400,
+            'detail' => 'The domain atelier-lumiere.example has not finished verification.',
+            'errorCode' => 4022,
+        ], 400, ['Content-Type' => 'application/problem+json']));
+
+        try {
+            $client->emailFacturx(self::invoice(), self::email());
+            self::fail('Expected ApiException');
+        } catch (ApiException $e) {
+            self::assertSame(400, $e->statusCode);
+            self::assertSame(4022, $e->errorCode);
+            self::assertSame('Sender domain not verified', $e->title);
+        }
+
+        self::assertCount(1, $this->history);
+    }
+
+    public function testEmailRetriesAfter429WithTheSameBody(): void
+    {
+        $client = $this->client(
+            self::jsonResponse(['status' => 429, 'errorCode' => 4019], 429, ['Retry-After' => '7']),
+            self::acceptedResponse(),
+        );
+
+        $result = $client->emailEmbeddedFacturx(new File('%PDF', 'a.pdf'), new File('<x/>', 'a.xml'), self::email());
+
+        self::assertSame([7], $this->sleeps);
+        self::assertCount(2, $this->history);
+        self::assertSame(
+            (string) $this->history[0]['request']->getBody(),
+            (string) $this->history[1]['request']->getBody(),
+        );
+        self::assertSame('msg-123', $result->messageId);
+    }
+
+    public function testEmailIsNotResentAfterServerError(): void
+    {
+        $client = $this->client(
+            self::jsonResponse(['title' => 'Service Unavailable', 'status' => 503, 'errorCode' => 4023], 503),
+            self::acceptedResponse(),
+        );
+
+        try {
+            $client->emailFacturx(self::invoice(), self::email());
+            self::fail('Expected ApiException');
+        } catch (ApiException $e) {
+            self::assertSame(503, $e->statusCode);
+        }
+
+        self::assertCount(1, $this->history);
+        self::assertSame([], $this->sleeps);
+    }
+
+    public function testEmailRefusesAListInASingleValueFieldOnBothRouteTypes(): void
+    {
+        $client = $this->client();
+
+        foreach (['from', 'fromName', 'to', 'replyTo', 'subject', 'message'] as $field) {
+            $email = [$field => ['un@atelier.example', 'deux@atelier.example']] + self::email();
+            $sends = [
+                static fn () => $client->emailFacturx(self::invoice(), $email),
+                static fn () => $client->emailEmbeddedFacturx(new File('%PDF', 'a.pdf'), new File('<x/>', 'a.xml'), $email),
+            ];
+
+            foreach ($sends as $send) {
+                try {
+                    $send();
+                    self::fail('Expected InvalidArgumentException');
+                } catch (\InvalidArgumentException $e) {
+                    self::assertStringContainsString("email.{$field}", $e->getMessage());
+                }
+            }
+        }
+
+        self::assertCount(0, $this->history);
+    }
+
+    public function testEmailDropsBlankCopyAddressesOnBothRouteTypes(): void
+    {
+        $email = [
+            'from' => 'factures@atelier.example',
+            'to' => 'compta@globex.example',
+            'cc' => [' ', ' anne@globex.example '],
+            'bcc' => [''],
+        ];
+        $client = $this->client(self::acceptedResponse(), self::acceptedResponse());
+
+        $client->emailFacturx(self::invoice(), $email);
+        $sent = json_decode((string) $this->lastRequest()->getBody(), true);
+        self::assertSame(
+            ['from' => 'factures@atelier.example', 'to' => 'compta@globex.example', 'cc' => ['anne@globex.example']],
+            $sent['email'],
+        );
+
+        $client->emailEmbeddedFacturx(new File('%PDF', 'a.pdf'), new File('<x/>', 'a.xml'), $email);
+        $body = (string) $this->lastRequest()->getBody();
+        self::assertSame(1, substr_count($body, 'name="email.cc"'));
+        self::assertStringContainsString("name=\"email.cc\"\r\n\r\nanne@globex.example\r\n", $body);
+        self::assertStringNotContainsString('name="email.bcc"', $body);
+    }
+
+    public function testEmailTurnsASingleCopyAddressIntoAListOnBothRouteTypes(): void
+    {
+        $email = ['from' => 'factures@atelier.example', 'to' => 'compta@globex.example', 'cc' => 'anne@globex.example'];
+        $client = $this->client(self::acceptedResponse(), self::acceptedResponse());
+
+        $client->emailFacturx(self::invoice(), $email);
+        $sent = json_decode((string) $this->lastRequest()->getBody(), true);
+        self::assertSame(['anne@globex.example'], $sent['email']['cc']);
+
+        $client->emailEmbeddedFacturx(new File('%PDF', 'a.pdf'), new File('<x/>', 'a.xml'), $email);
+        $body = (string) $this->lastRequest()->getBody();
+        self::assertSame(1, substr_count($body, 'name="email.cc"'));
+        self::assertStringContainsString("name=\"email.cc\"\r\n\r\nanne@globex.example\r\n", $body);
+    }
+
+    public function testEmailRefusesTextThatIsNotValidUtf8OnBothRouteTypes(): void
+    {
+        $client = $this->client();
+        $emails = [
+            ['subject' => "Facture \xE9mise en f\xE9vrier"] + self::email(),
+            ['cc' => ["ren\xE9e@globex.example"]] + self::email(),
+        ];
+
+        foreach ($emails as $email) {
+            $sends = [
+                static fn () => $client->emailFacturx(self::invoice(), $email),
+                static fn () => $client->emailEmbeddedFacturx(new File('%PDF', 'a.pdf'), new File('<x/>', 'a.xml'), $email),
+            ];
+
+            foreach ($sends as $send) {
+                try {
+                    $send();
+                    self::fail('Expected InvalidArgumentException');
+                } catch (\InvalidArgumentException $e) {
+                    self::assertStringContainsString('UTF-8', $e->getMessage());
+                }
+            }
+        }
+
+        self::assertCount(0, $this->history);
     }
 
     public function testExtractJsonReturnsInvoiceEnvelope(): void

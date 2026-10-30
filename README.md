@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/InvoiceXML/invoicexml-php-facturx/actions/workflows/tests.yml/badge.svg)](https://github.com/InvoiceXML/invoicexml-php-facturx/actions/workflows/tests.yml)
 
-A thin PHP client for the [InvoiceXML API](https://www.invoicexml.com) that creates, validates, embeds and reads **Factur-X** e-invoices. A Factur-X invoice is a PDF/A-3 with embedded EN 16931 CII XML, the hybrid format of the French e-invoicing mandate.
+A thin PHP client for the [InvoiceXML API](https://www.invoicexml.com) that creates, validates, embeds, emails and reads **Factur-X** e-invoices. A Factur-X invoice is a PDF/A-3 with embedded EN 16931 CII XML, the hybrid format of the French e-invoicing mandate.
 
 You send an invoice as a PHP array, and the API computes totals and the VAT breakdown, builds the XML and the PDF/A-3, and validates the result before returning it. Your project needs no PDF library, no XML builder and no Schematron tooling.
 
@@ -40,13 +40,13 @@ The result is a Factur-X PDF/A-3 in the EN 16931 profile, already validated agai
 
 - **Rule sets updated on their legal effective dates.** New Factur-X and BR-FR releases go live server-side on the day they take effect. You never update a package or redeploy to stay compliant.
 - **Validated before delivery.** Every created or embedded invoice passes the full rule set before it is returned. Data that cannot produce a compliant invoice is refused with the violated rules, so nothing broken reaches a customer.
-- **Zero data retention.** Documents are processed in memory and discarded when the response is returned. Your data is never used for AI training.
+- **Zero data retention.** Documents are processed in memory and discarded when the response is returned. Your data is never used for AI training. When you email an invoice, it goes to our email service for delivery, and we keep no copy.
 - **Processing in Frankfurt.** All processing runs in Frankfurt, Germany.
 - **Integration assistance.** When a rule finding needs a human explanation, a person who knows the rule sets answers your support request.
 
 ## Get an API key
 
-Sign up at [invoicexml.com](https://www.invoicexml.com/account/signup) to start a 30-day free trial with 100 credits. No credit card is needed. Plans are listed on the [pricing page](https://www.invoicexml.com/pricing).
+Sign up at [www.invoicexml.com](https://www.invoicexml.com/account/signup) to start a 30-day free trial with 100 credits. No credit card is needed. Plans are listed on the [pricing page](https://www.invoicexml.com/pricing).
 
 ## Usage
 
@@ -107,6 +107,47 @@ $facturx = $client->embedFacturx('layout.pdf', 'factur-x.xml');
 ```
 
 The XML is validated before embedding. Pass `skipValidation: true` to embed it as is.
+
+### Send an invoice by email
+
+The API creates and validates the invoice like `createFacturx()`, then sends the file as a real email from your own address. The sender must be on a domain added and verified on the Verified email domains page of the dashboard.
+
+```php
+$result = $client->emailFacturx($invoice, [
+    'from'     => 'facturation@atelier-lumiere.example', // required
+    'to'       => 'compta@globex.example',               // required, one address
+    'fromName' => 'Atelier Lumière',
+    'cc'       => ['anna@globex.example'],               // cc and bcc hold at most 2 addresses together
+    'bcc'      => ['archive@atelier-lumiere.example'],
+    'replyTo'  => 'contact@atelier-lumiere.example',
+    'subject'  => 'Votre facture FA-2026-0142',
+    'message'  => "Bonjour Anna,\n\nvotre facture est jointe.",
+], ['language' => 'fr']);
+
+echo $result->status, ' ', $result->messageId;
+```
+
+To send a PDF and XML you already have, use `emailEmbeddedFacturx()`, which always validates the XML. Pass `rules: ['br-fr']` to add the French mandate rules:
+
+```php
+$result = $client->emailEmbeddedFacturx('layout.pdf', 'factur-x.xml', [
+    'from' => 'facturation@atelier-lumiere.example',
+    'to'   => 'compta@globex.example',
+], rules: ['br-fr']);
+```
+
+No file comes back. `accepted` means the email was handed over for delivery, not yet that the recipient's mail server received it. Keep `messageId`: it identifies the email when you ask about a delivery later.
+
+A refused email throws `ApiException` with one of these `errorCode` values, and 4020, 4021 and 4022 are not billed:
+
+- `4020`: your plan does not include email delivery, see the [pricing page](https://www.invoicexml.com/pricing).
+- `4021`: email sending is disabled or paused for your account.
+- `4022`: the sender domain has not finished verification.
+- `4002`: a field was refused, for example a bad address, a sender domain that is not on your account, or too many copies. `$e->errors` names the fields.
+
+Only a 429 is retried, because nothing was sent. A timeout or connection failure throws the HTTP client's own exception rather than `ApiException`, and the email may already have gone out, so check before you send it again. The same goes for a 503 with error code 4023, which can happen while the email is being sent.
+
+The full guide is at [Send an invoice by email](https://www.invoicexml.com/docs/api/create/facturx/email).
 
 ### Read incoming invoices
 
