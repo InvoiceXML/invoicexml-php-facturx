@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/InvoiceXML/invoicexml-php-facturx/actions/workflows/tests.yml/badge.svg)](https://github.com/InvoiceXML/invoicexml-php-facturx/actions/workflows/tests.yml)
 
-A thin PHP client for the [InvoiceXML API](https://www.invoicexml.com) that creates, validates, embeds, emails and reads **Factur-X** e-invoices. A Factur-X invoice is a PDF/A-3 with embedded EN 16931 CII XML, the hybrid format of the French e-invoicing mandate.
+A thin PHP client for the [InvoiceXML API](https://www.invoicexml.com) that creates, validates, embeds, renders, converts, emails and reads **Factur-X** e-invoices. A Factur-X invoice is a PDF/A-3 with embedded EN 16931 CII XML, the hybrid format of the French e-invoicing mandate.
 
 You send an invoice as a PHP array, and the API computes totals and the VAT breakdown, builds the XML and the PDF/A-3, and validates the result before returning it. Your project needs no PDF library, no XML builder and no Schematron tooling.
 
@@ -73,6 +73,7 @@ For invoices bound for the French exchange network, add `br-fr`. The invoice is 
 ```php
 $pdf    = $client->createFacturx($invoice, ['rules' => ['br-fr']]);
 $result = $client->validateFacturx('facture.pdf', rules: ['br-fr']);
+$report = $client->validateFacturxReport('facture.pdf', rules: ['br-fr']);
 $pdf    = $client->embedFacturx('layout.pdf', 'factur-x.xml', rules: ['br-fr']);
 ```
 
@@ -100,6 +101,22 @@ Each finding carries the following fields:
 
 `$result->data` holds the verdict details, such as `schemaValid`, `schematronValid` and `profile`. `$result->report` is the field report: one row per invoice field with its value and its findings.
 
+### Get a validation report as PDF
+
+```php
+$report = $client->validateFacturxReport('incoming.pdf', validationLanguage: 'fr');
+
+$report->file->save('report.pdf');
+
+if ($report->valid === false) {
+    echo "The invoice failed validation, see the report.\n";
+}
+```
+
+`$report->file` is the printable report. `$report->valid` is `true` or `false`, or `null` if the response carried no verdict. A failed verdict is a normal result, not an exception. A missing or malformed file still throws `ApiException`. `validationLanguage` (`en`, `de` or `fr`) words the whole report, and `rules` works as in `validateFacturx()`.
+
+The reference page is [Factur-X report](https://www.invoicexml.com/docs/api/validate/facturx/report).
+
 ### Embed XML into an existing PDF
 
 ```php
@@ -107,6 +124,30 @@ $facturx = $client->embedFacturx('layout.pdf', 'factur-x.xml');
 ```
 
 The XML is validated before embedding. Pass `skipValidation: true` to embed it as is.
+
+### Render an invoice XML as PDF
+
+```php
+$preview = $client->renderCiiToPdf('factur-x.xml', language: 'fr', includeQrCode: true);
+```
+
+`language` is `en`, `de` or `fr`. `logoUrl` prints your logo and `includeQrCode: true` prints the payment QR code. Rendering shows what the XML carries and does not validate it.
+
+The reference page is [render CII](https://www.invoicexml.com/docs/api/render/cii/to/pdf).
+
+### Convert between formats
+
+```php
+$ubl = $client->convertFacturxToUbl('incoming.pdf');
+$pdf = $client->convertCiiToFacturx('invoice.xml', language: 'fr');
+```
+
+Each route has its own method:
+
+- Factur-X PDF to XML: [`convertFacturxToUbl()`](https://www.invoicexml.com/docs/api/convert/facturx/to/ubl), [`convertFacturxToCii()`](https://www.invoicexml.com/docs/api/convert/facturx/to/cii)
+- XML to Factur-X PDF: [`convertCiiToFacturx()`](https://www.invoicexml.com/docs/api/convert/cii/to/facturx), [`convertUblToFacturx()`](https://www.invoicexml.com/docs/api/convert/ubl/to/facturx), [`convertXrechnungToFacturx()`](https://www.invoicexml.com/docs/api/convert/xrechnung/to/facturx)
+
+The methods that return a Factur-X PDF take `language` (`en`, `de` or `fr`) for the labels of the PDF. Every method takes `validationLanguage` (`en`, `de` or `fr`), which words the findings of a failed conversion. A failed conversion throws `ApiException`, and `$e->errors` lists the violated rules.
 
 ### Send an invoice by email
 
@@ -145,7 +186,7 @@ A refused email throws `ApiException` with one of these `errorCode` values, and 
 - `4022`: the sender domain has not finished verification.
 - `4002`: a field was refused, for example a bad address, a sender domain that is not on your account, or too many copies. `$e->errors` names the fields.
 
-Only a 429 is retried, because nothing was sent. A timeout or connection failure throws the HTTP client's own exception rather than `ApiException`, and the email may already have gone out, so check before you send it again. The same goes for a 503 with error code 4023, which can happen while the email is being sent.
+Only a 429 is retried, because nothing was sent. A timeout or connection failure throws the HTTP client's own exception rather than `ApiException`, and the email may already have gone out, so check before you send it again.
 
 The full guide is at [Send an invoice by email](https://www.invoicexml.com/docs/api/create/facturx/email).
 
@@ -159,6 +200,18 @@ $zip = $client->extractAttachments('incoming.pdf');       // supporting document
 ```
 
 Extraction parses the embedded XML deterministically, with no AI involved. The returned invoice can go straight back into `createFacturx()`.
+
+### Transform a PDF invoice
+
+This method takes a PDF without embedded XML. AI reads the PDF, so a person must check the result before it is used.
+
+```php
+$facturx = $client->transformToFacturx('invoice.pdf', language: 'fr');
+```
+
+`language` is `en`, `de`, `fr` or `auto`, the default, which follows the language of the invoice. By default the PDF is rendered from the data that was read and ends with an electronic invoice details section, so that data can be checked on the pages. Pass `includeAdvancedProperties: false` to leave the section out, or `preserveOriginalPdf: true` to keep the uploaded PDF as the visual layer. `validationLanguage` (`en`, `de` or `fr`) words the findings of a refused invoice. A 429 on this method is not retried automatically, so wait for `Retry-After` before calling again if you want to retry.
+
+The reference page is [transform to Factur-X](https://www.invoicexml.com/docs/api/transform/to/facturx).
 
 ## Errors and rate limits
 
@@ -179,7 +232,7 @@ try {
 
 `errorCode` is a stable numeric code, documented under [error handling](https://www.invoicexml.com/docs/error-handling).
 
-When too many requests for one API key run at the same time, the API answers 429 with a `Retry-After` header. The client waits that long and resends the request, up to 3 times. A request answered with 429 was not processed and not billed, so resending never creates duplicates. If the retries are used up, a `TooManyRequestsException` carries `retryAfter` in seconds. Set `maxRetries: 0` to handle 429 yourself.
+When too many requests for one API key run at the same time, the API answers 429 with a `Retry-After` header. Every call except transform waits that long and resends the request, up to 3 times. A 429 is not billed. If the retries are used up, a `TooManyRequestsException` carries `retryAfter` in seconds. Set `maxRetries: 0` to handle 429 yourself.
 
 ## Configuration
 

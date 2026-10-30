@@ -55,7 +55,7 @@ final class Client
      * @param ClientInterface|null         $httpClient     Any PSR-18 client. Defaults to Guzzle.
      * @param RequestFactoryInterface|null $requestFactory PSR-17 request factory. Defaults to Guzzle's.
      * @param StreamFactoryInterface|null  $streamFactory  PSR-17 stream factory. Defaults to Guzzle's.
-     * @param int                          $maxRetries     How often a 429 is retried after waiting Retry-After seconds. 0 disables retries.
+     * @param int                          $maxRetries     How often a 429 is retried after waiting Retry-After seconds, on every call except transform. 0 disables retries.
      * @param (callable(int): void)|null   $sleep          Wait function used between retries, in seconds. Defaults to sleep().
      */
     public function __construct(
@@ -121,6 +121,22 @@ final class Client
     }
 
     /**
+     * Validates a Factur-X PDF like validateFacturx() and returns a printable PDF report plus
+     * the verdict. A failed verdict is a normal result, not an exception. Problems with the
+     * upload itself, such as a missing or malformed file, throw ApiException.
+     *
+     * @param string|File  $pdf                Path to the PDF, or a File.
+     * @param list<string> $rules              Extra national rule sets, for example ["br-fr"] for the French mandate.
+     * @param string|null  $validationLanguage "en", "de" or "fr". Words the whole report.
+     */
+    public function validateFacturxReport(string|File $pdf, array $rules = [], ?string $validationLanguage = null): ValidationReport
+    {
+        $fields = ['rules' => $rules] + self::formFields(['validationLanguage' => $validationLanguage]);
+
+        return $this->report($this->postMultipart('/v1/validate/facturx/report', ['file' => $pdf], $fields));
+    }
+
+    /**
      * Embeds an existing CII XML into an existing PDF and returns a Factur-X PDF/A-3.
      * The XML is validated before embedding unless $skipValidation is true.
      *
@@ -155,6 +171,119 @@ final class Client
         $fields = ['rules' => $rules] + self::emailFormFields($email);
 
         return $this->emailResult($this->postMultipart('/v1/embed/facturx/email', ['pdf' => $pdf, 'xml' => $xml], $fields));
+    }
+
+    /**
+     * Renders a CII XML, such as the XML of a Factur-X invoice, as a human-readable PDF.
+     *
+     * @param string|File $xml           Path to the XML, or a File.
+     * @param string|null $language      "en", "de" or "fr". Defaults to "en".
+     * @param string|null $logoUrl       Public PNG or JPEG URL printed on the PDF.
+     * @param bool|null   $includeQrCode True prints the payment QR code on the PDF.
+     */
+    public function renderCiiToPdf(string|File $xml, ?string $language = null, ?string $logoUrl = null, ?bool $includeQrCode = null): File
+    {
+        $fields = self::formFields(['language' => $language, 'logoUrl' => $logoUrl, 'includeQrCode' => $includeQrCode]);
+
+        return $this->file($this->postMultipart('/v1/render/cii/to/pdf', ['file' => $xml], $fields), 'invoice.pdf');
+    }
+
+    /**
+     * Converts the XML embedded in a Factur-X PDF to UBL.
+     *
+     * @param string|File $pdf                Path to the PDF, or a File.
+     * @param string|null $validationLanguage "en", "de" or "fr". Words the findings of a failed conversion.
+     *
+     * @throws ApiException when the result would not be compliant ($errors lists the violated rules)
+     */
+    public function convertFacturxToUbl(string|File $pdf, ?string $validationLanguage = null): File
+    {
+        return $this->convert('/v1/convert/facturx/to/ubl', $pdf, 'invoice-ubl.xml', ['validationLanguage' => $validationLanguage]);
+    }
+
+    /**
+     * Converts the XML embedded in a Factur-X PDF to plain CII.
+     *
+     * @param string|File $pdf                Path to the PDF, or a File.
+     * @param string|null $validationLanguage "en", "de" or "fr". Words the findings of a failed conversion.
+     *
+     * @throws ApiException when the result would not be compliant ($errors lists the violated rules)
+     */
+    public function convertFacturxToCii(string|File $pdf, ?string $validationLanguage = null): File
+    {
+        return $this->convert('/v1/convert/facturx/to/cii', $pdf, 'invoice-cii.xml', ['validationLanguage' => $validationLanguage]);
+    }
+
+    /**
+     * Converts a CII XML to a Factur-X PDF/A-3.
+     *
+     * @param string|File $xml                Path to the XML, or a File.
+     * @param string|null $language           "en", "de" or "fr". Labels of the rendered PDF and default texts. Defaults to "en".
+     * @param string|null $validationLanguage "en", "de" or "fr". Words the findings of a failed conversion.
+     *
+     * @throws ApiException when the result would not be compliant ($errors lists the violated rules)
+     */
+    public function convertCiiToFacturx(string|File $xml, ?string $language = null, ?string $validationLanguage = null): File
+    {
+        return $this->convert('/v1/convert/cii/to/facturx', $xml, 'invoice-facturx.pdf', ['language' => $language, 'validationLanguage' => $validationLanguage]);
+    }
+
+    /**
+     * Converts a UBL XML to a Factur-X PDF/A-3.
+     *
+     * @param string|File $xml                Path to the XML, or a File.
+     * @param string|null $language           "en", "de" or "fr". Labels of the rendered PDF and default texts. Defaults to "en".
+     * @param string|null $validationLanguage "en", "de" or "fr". Words the findings of a failed conversion.
+     *
+     * @throws ApiException when the result would not be compliant ($errors lists the violated rules)
+     */
+    public function convertUblToFacturx(string|File $xml, ?string $language = null, ?string $validationLanguage = null): File
+    {
+        return $this->convert('/v1/convert/ubl/to/facturx', $xml, 'invoice-facturx.pdf', ['language' => $language, 'validationLanguage' => $validationLanguage]);
+    }
+
+    /**
+     * Converts an XRechnung XML (UBL or CII) to a Factur-X PDF/A-3.
+     *
+     * @param string|File $xml                Path to the XML, or a File.
+     * @param string|null $language           "en", "de" or "fr". Labels of the rendered PDF and default texts. Defaults to "en".
+     * @param string|null $validationLanguage "en", "de" or "fr". Words the findings of a failed conversion.
+     *
+     * @throws ApiException when the result would not be compliant ($errors lists the violated rules)
+     */
+    public function convertXrechnungToFacturx(string|File $xml, ?string $language = null, ?string $validationLanguage = null): File
+    {
+        return $this->convert('/v1/convert/xrechnung/to/facturx', $xml, 'invoice-facturx.pdf', ['language' => $language, 'validationLanguage' => $validationLanguage]);
+    }
+
+    /**
+     * Reads a PDF invoice and returns a Factur-X PDF/A-3. AI reads the PDF, so a person must
+     * check the result before it is used. A 429 on this method is not retried automatically,
+     * so wait for Retry-After before calling again if you want to retry.
+     *
+     * @param string|File $pdf                       Path to the PDF, or a File.
+     * @param string|null $language                  "en", "de", "fr" or "auto". Labels of the rendered PDF and default texts. Defaults to "auto", the language the invoice is written in.
+     * @param bool|null   $preserveOriginalPdf       True keeps the uploaded PDF as the visual layer and only embeds the XML. Earlier attachments and form fields are not kept.
+     * @param bool|null   $includeAdvancedProperties False leaves the electronic invoice details section out of the rendered PDF. On by default, ignored with $preserveOriginalPdf.
+     * @param string|null $validationLanguage        "en", "de" or "fr". Words the findings of a refused invoice.
+     *
+     * @throws ApiException when the invoice would not be compliant ($errors lists the violated rules)
+     */
+    public function transformToFacturx(
+        string|File $pdf,
+        ?string $language = null,
+        ?bool $preserveOriginalPdf = null,
+        ?bool $includeAdvancedProperties = null,
+        ?string $validationLanguage = null,
+    ): File {
+        $fields = self::formFields([
+            'language' => $language,
+            'preserveOriginalPdf' => $preserveOriginalPdf,
+            'includeAdvancedProperties' => $includeAdvancedProperties,
+            'validationLanguage' => $validationLanguage,
+        ]);
+
+        return $this->file($this->postMultipart('/v1/transform/to/facturx', ['file' => $pdf], $fields, retryRateLimit: false), 'invoice-facturx.pdf');
     }
 
     /**
@@ -261,10 +390,35 @@ final class Client
     }
 
     /**
+     * The optional form fields as sent. Null means not set and is never sent, so the API's
+     * default stays in charge. A bool goes out as the text true or false.
+     *
+     * @param array<string, string|bool|null> $fields
+     * @return array<string, string>
+     */
+    private static function formFields(array $fields): array
+    {
+        $sent = [];
+        foreach ($fields as $name => $value) {
+            if ($value !== null) {
+                $sent[$name] = is_bool($value) ? ($value ? 'true' : 'false') : $value;
+            }
+        }
+
+        return $sent;
+    }
+
+    /** @param array<string, string|null> $fields */
+    private function convert(string $path, string|File $file, string $fallbackName, array $fields): File
+    {
+        return $this->file($this->postMultipart($path, ['file' => $file], self::formFields($fields)), $fallbackName);
+    }
+
+    /**
      * @param array<string, string|File>              $files
      * @param array<string, string|list<string>>      $fields A list value is sent as one repeated field per item.
      */
-    private function postMultipart(string $path, array $files, array $fields = []): ResponseInterface
+    private function postMultipart(string $path, array $files, array $fields = [], bool $retryRateLimit = true): ResponseInterface
     {
         $boundary = 'invoicexml-' . bin2hex(random_bytes(12));
         $body = '';
@@ -288,10 +442,10 @@ final class Client
 
         $body .= "--{$boundary}--\r\n";
 
-        return $this->send($path, 'multipart/form-data; boundary=' . $boundary, $body);
+        return $this->send($path, 'multipart/form-data; boundary=' . $boundary, $body, $retryRateLimit);
     }
 
-    private function send(string $path, string $contentType, string $body): ResponseInterface
+    private function send(string $path, string $contentType, string $body, bool $retryRateLimit = true): ResponseInterface
     {
         $attempt = 0;
 
@@ -306,7 +460,7 @@ final class Client
             $response = $this->http->sendRequest($request);
             $status = $response->getStatusCode();
 
-            if ($status === 429 && $attempt < $this->maxRetries) {
+            if ($status === 429 && $retryRateLimit && $attempt < $this->maxRetries) {
                 $attempt++;
                 ($this->sleep)($this->retryAfter($response));
                 continue;
@@ -382,6 +536,17 @@ final class Client
     private function emailResult(ResponseInterface $response): EmailResult
     {
         return EmailResult::fromArray($this->json($response));
+    }
+
+    private function report(ResponseInterface $response): ValidationReport
+    {
+        $valid = match (strtolower(trim($response->getHeaderLine('X-Invoice-Valid')))) {
+            'true' => true,
+            'false' => false,
+            default => null,
+        };
+
+        return new ValidationReport($this->file($response, 'validation-report.pdf'), $valid);
     }
 
     private function file(ResponseInterface $response, string $fallbackName): File
