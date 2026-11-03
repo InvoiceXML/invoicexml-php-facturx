@@ -95,6 +95,43 @@ final class Client
     }
 
     /**
+     * Creates a plain EN 16931 CII XML invoice. The XML declares the EN 16931 profile, so it
+     * goes straight into embedFacturx() to turn your own PDF into a Factur-X invoice.
+     *
+     * Options (all optional):
+     *  - language: "en", "de" or "fr". Default texts such as payment terms.
+     *  - rules:    ["br-fr"] also validates against the BR-FR Flux 2 rules of the French mandate.
+     *
+     * @param array<string, mixed> $invoice InvoiceDocument fields, for example invoiceNumber, issueDate, currency, seller, buyer, lines.
+     * @param array<string, mixed> $options language and rules, see above.
+     *
+     * @throws ApiException when the invoice would not be compliant ($errors lists the violated rules)
+     */
+    public function createCii(array $invoice, array $options = []): File
+    {
+        return $this->file($this->postJson('/v1/create/cii', $invoice, $options), 'invoice-cii.xml');
+    }
+
+    /**
+     * Creates a UBL XML invoice.
+     *
+     * Options (all optional):
+     *  - profile:  "en16931", "peppol-bis-3", "nlcius", "ehf", "xrechnung" or "pint". Picks the UBL
+     *              CustomizationID and the rule set the invoice is validated against. Defaults to "peppol-bis-3".
+     *  - language: "en", "de" or "fr". Default texts such as payment terms.
+     *  - rules:    ["br-fr"] also validates against the BR-FR Flux 2 rules of the French mandate.
+     *
+     * @param array<string, mixed> $invoice InvoiceDocument fields, for example invoiceNumber, issueDate, currency, seller, buyer, lines.
+     * @param array<string, mixed> $options profile, language and rules, see above.
+     *
+     * @throws ApiException when the invoice would not be compliant ($errors lists the violated rules)
+     */
+    public function createUbl(array $invoice, array $options = []): File
+    {
+        return $this->file($this->postJson('/v1/create/ubl', $invoice, $options), 'invoice-ubl.xml');
+    }
+
+    /**
      * Creates a Factur-X invoice like createFacturx() and sends it as a real email from your
      * own verified domain. Returns the message id, not the file.
      *

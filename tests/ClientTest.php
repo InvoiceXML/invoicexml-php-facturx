@@ -123,6 +123,127 @@ final class ClientTest extends TestCase
         self::assertSame('invoice-facturx.pdf', $file->filename);
     }
 
+    public function testCreateCiiPostsEnvelopeAndReturnsXml(): void
+    {
+        $client = $this->client(new Response(200, [
+            'Content-Type' => 'application/xml; charset=utf-8',
+            'Content-Disposition' => 'attachment; filename="invoice-cii-FA-2026-0142.xml"',
+        ], '<rsm:CrossIndustryInvoice/>'));
+
+        $file = $client->createCii(self::invoice(), ['language' => 'fr', 'rules' => ['br-fr']]);
+
+        $request = $this->lastRequest();
+        self::assertSame('POST', $request->getMethod());
+        self::assertSame('https://api.invoicexml.com/v1/create/cii', (string) $request->getUri());
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
+        self::assertSame(
+            ['invoice' => self::invoice(), 'options' => ['language' => 'fr', 'rules' => ['br-fr']]],
+            json_decode((string) $request->getBody(), true),
+        );
+
+        self::assertSame('<rsm:CrossIndustryInvoice/>', $file->contents);
+        self::assertSame('invoice-cii-FA-2026-0142.xml', $file->filename);
+        self::assertSame('application/xml', $file->contentType);
+    }
+
+    public function testCreateCiiOmitsOptionsWhenEmpty(): void
+    {
+        $client = $this->client(new Response(200, ['Content-Type' => 'application/xml'], '<rsm:CrossIndustryInvoice/>'));
+
+        $file = $client->createCii(self::invoice());
+
+        self::assertSame(['invoice' => self::invoice()], json_decode((string) $this->lastRequest()->getBody(), true));
+        self::assertSame('invoice-cii.xml', $file->filename);
+    }
+
+    public function testCreatedCiiGoesStraightIntoEmbedFacturx(): void
+    {
+        $client = $this->client(
+            new Response(200, ['Content-Type' => 'application/xml', 'Content-Disposition' => 'attachment; filename="invoice-cii-FA-1.xml"'], '<rsm:CrossIndustryInvoice/>'),
+            self::pdfResponse(),
+        );
+
+        $xml = $client->createCii(self::invoice());
+        $client->embedFacturx(new File('%PDF-1.7 visual', 'layout.pdf'), $xml);
+
+        $body = (string) $this->lastRequest()->getBody();
+        self::assertSame('https://api.invoicexml.com/v1/embed/facturx', (string) $this->lastRequest()->getUri());
+        self::assertStringContainsString("name=\"xml\"; filename=\"invoice-cii-FA-1.xml\"\r\nContent-Type: application/xml\r\n\r\n<rsm:CrossIndustryInvoice/>\r\n", $body);
+    }
+
+    public function testRejectedCreateCiiThrowsWithFindings(): void
+    {
+        $client = $this->client(self::jsonResponse([
+            'title' => 'Invoice validation failed',
+            'status' => 400,
+            'errorCode' => 4001,
+            'errors' => [['rule' => 'BR-FR-12', 'layer' => 'cius', 'line' => null, 'message' => 'Le SIREN du vendeur est absent.', 'fields' => ['seller.legalRegistrationIdentifier'], 'raw' => null]],
+        ], 400, ['Content-Type' => 'application/problem+json']));
+
+        try {
+            $client->createCii(self::invoice(), ['rules' => ['br-fr']]);
+            self::fail('Expected ApiException');
+        } catch (ApiException $e) {
+            self::assertSame(400, $e->statusCode);
+            self::assertSame(4001, $e->errorCode);
+            self::assertSame('BR-FR-12', $e->errors[0]->rule);
+            self::assertSame(['seller.legalRegistrationIdentifier'], $e->errors[0]->fields);
+        }
+    }
+
+    public function testCreateUblPostsEnvelopeAndReturnsXml(): void
+    {
+        $client = $this->client(new Response(200, [
+            'Content-Type' => 'application/xml; charset=utf-8',
+            'Content-Disposition' => 'attachment; filename="invoice-ubl-FA-2026-0142.xml"',
+        ], '<Invoice/>'));
+
+        $file = $client->createUbl(self::invoice(), ['profile' => 'peppol-bis-3', 'language' => 'fr', 'rules' => ['br-fr']]);
+
+        $request = $this->lastRequest();
+        self::assertSame('POST', $request->getMethod());
+        self::assertSame('https://api.invoicexml.com/v1/create/ubl', (string) $request->getUri());
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
+        self::assertSame(
+            ['invoice' => self::invoice(), 'options' => ['profile' => 'peppol-bis-3', 'language' => 'fr', 'rules' => ['br-fr']]],
+            json_decode((string) $request->getBody(), true),
+        );
+
+        self::assertSame('<Invoice/>', $file->contents);
+        self::assertSame('invoice-ubl-FA-2026-0142.xml', $file->filename);
+        self::assertSame('application/xml', $file->contentType);
+    }
+
+    public function testCreateUblOmitsOptionsWhenEmpty(): void
+    {
+        $client = $this->client(new Response(200, ['Content-Type' => 'application/xml'], '<Invoice/>'));
+
+        $file = $client->createUbl(self::invoice());
+
+        self::assertSame(['invoice' => self::invoice()], json_decode((string) $this->lastRequest()->getBody(), true));
+        self::assertSame('invoice-ubl.xml', $file->filename);
+    }
+
+    public function testRejectedCreateUblThrowsWithFindings(): void
+    {
+        $client = $this->client(self::jsonResponse([
+            'title' => 'Invoice validation failed',
+            'status' => 400,
+            'errorCode' => 4001,
+            'errors' => [['rule' => 'PEPPOL-EN16931-R010', 'layer' => 'cius', 'line' => null, 'message' => 'Buyer electronic address must be provided.', 'fields' => ['buyer.electronicAddress'], 'raw' => null]],
+        ], 400, ['Content-Type' => 'application/problem+json']));
+
+        try {
+            $client->createUbl(self::invoice(), ['profile' => 'peppol-bis-3']);
+            self::fail('Expected ApiException');
+        } catch (ApiException $e) {
+            self::assertSame(400, $e->statusCode);
+            self::assertSame(4001, $e->errorCode);
+            self::assertSame('PEPPOL-EN16931-R010', $e->errors[0]->rule);
+            self::assertSame(['buyer.electronicAddress'], $e->errors[0]->fields);
+        }
+    }
+
     public function testRejectedCreateThrowsWithFindings(): void
     {
         $client = $this->client(self::jsonResponse([
