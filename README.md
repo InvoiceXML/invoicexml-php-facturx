@@ -147,12 +147,12 @@ $ubl = $client->createUbl($invoice, ['profile' => 'peppol-bis-3']);
 ### Render an invoice XML as PDF
 
 ```php
-$preview = $client->renderCiiToPdf('factur-x.xml', language: 'fr', includeQrCode: true);
+$preview = $client->renderXmlToPdf('factur-x.xml', language: 'fr', includeQrCode: true);
 ```
 
-`language` is `en`, `de` or `fr`. `logoUrl` prints your logo and `includeQrCode: true` prints the payment QR code. Rendering shows what the XML carries and does not validate it.
+`renderXmlToPdf()` takes any invoice XML, CII (such as the XML of a Factur-X invoice), UBL or XRechnung, and detects the format. `language` is `en`, `de` or `fr`. `logoUrl` prints your logo and `includeQrCode: true` prints the payment QR code. Rendering shows what the XML carries and does not validate it.
 
-The reference page is [render CII](https://www.invoicexml.com/docs/api/render/cii/to/pdf).
+The reference page is [render XML](https://www.invoicexml.com/docs/api/render/xml/to/pdf).
 
 ### Convert between formats
 
@@ -220,6 +220,17 @@ $zip = $client->extractAttachments('incoming.pdf');       // supporting document
 
 Extraction parses the embedded XML deterministically, with no AI involved. The returned invoice can go straight back into `createFacturx()`.
 
+### Read a PDF invoice with AI
+
+`parseJson()` reads any PDF invoice, typed, scanned or photographed, into the same invoice array, plus `confidence` scores from 0 to 1 and the `language` the invoice is written in (each `null` when not reported). Any language can come back, so `language` is not always a value the `language` option of the create and render methods takes (`en`, `de` or `fr`). AI reads the PDF, so a person must check the data before it is used. Embedded XML is ignored, so use `extractJson()` for a Factur-X PDF. A 429 on this method is not retried automatically.
+
+```php
+$parsed  = $client->parseJson('scan.pdf');
+$invoice = $parsed['invoice'];                            // same shape createFacturx() accepts
+```
+
+The reference page is [parse to JSON](https://www.invoicexml.com/docs/api/parse/json).
+
 ### Transform a PDF invoice
 
 This method takes a PDF without embedded XML. AI reads the PDF, so a person must check the result before it is used.
@@ -231,6 +242,10 @@ $facturx = $client->transformToFacturx('invoice.pdf', language: 'fr');
 `language` is `en`, `de`, `fr` or `auto`, the default, which follows the language of the invoice. By default the PDF is rendered from the data that was read and ends with an electronic invoice details section, so that data can be checked on the pages. Pass `includeAdvancedProperties: false` to leave the section out, or `preserveOriginalPdf: true` to keep the uploaded PDF as the visual layer. `validationLanguage` (`en`, `de` or `fr`) words the findings of a refused invoice. A 429 on this method is not retried automatically, so wait for `Retry-After` before calling again if you want to retry.
 
 The reference page is [transform to Factur-X](https://www.invoicexml.com/docs/api/transform/to/facturx).
+
+## Examples
+
+The [examples](examples) folder holds small scripts that each show one common task from start to finish: creating a Factur-X invoice with your own PDF, creating a CII XML and embedding it, validating, rendering, converting, transforming a PDF invoice, reading a PDF invoice with AI and reading e-invoices. See the [examples overview](examples/README.md) for the list and how to run them.
 
 ## Errors and rate limits
 
@@ -251,7 +266,7 @@ try {
 
 `errorCode` is a stable numeric code, documented under [error handling](https://www.invoicexml.com/docs/error-handling).
 
-When too many requests for one API key run at the same time, the API answers 429 with a `Retry-After` header. Every call except transform waits that long and resends the request, up to 3 times. A 429 is not billed. If the retries are used up, a `TooManyRequestsException` carries `retryAfter` in seconds. Set `maxRetries: 0` to handle 429 yourself.
+When too many requests for one API key run at the same time, the API answers 429 with a `Retry-After` header. Every call except transform and parse waits that long and resends the request, up to 3 times. A 429 is not billed. If the retries are used up, a `TooManyRequestsException` carries `retryAfter` in seconds. Set `maxRetries: 0` to handle 429 yourself.
 
 ## Configuration
 
